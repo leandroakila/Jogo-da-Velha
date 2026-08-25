@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jogo da Velha</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; justify-content: center; align-items: center; color: #333; }
+        
+        .container { background: #fff; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); width: 90%; max-width: 600px; padding: 30px; display: flex; flex-direction: column; align-items: center; gap: 20px; position: relative; }
+        
+        h1 { color: #764ba2; font-size: 2.5rem; margin-bottom: 10px; }
+        h2 { color: #555; font-size: 1.2rem; margin-bottom: 5px; }
+        
+        button { padding: 15px 25px; font-size: 1.1rem; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: white; transition: 0.3s; width: 100%; max-width: 300px; }
+        button:hover { transform: scale(1.02); }
+        
+        .btn-primary { background: #764ba2; }
+        .btn-primary:hover { background: #5a3a7e; }
+        .btn-green { background: #28a745; }
+        .btn-green:hover { background: #218838; }
+        .btn-blue { background: #007bff; }
+        .btn-blue:hover { background: #0069d9; }
+        .btn-danger { background: #dc3545; }
+        .btn-danger:hover { background: #c82333; }
+        
+        .screen { width: 100%; display: none; flex-direction: column; align-items: center; gap: 15px; }
+        .screen.active { display: flex; }
+        
+        #menu-screen { text-align: center; }
+        .mode-option { width: 100%; display: flex; flex-direction: column; gap: 15px; margin-top: 20px; }
+        
+        #online-screen { width: 100%; }
+        .input-group { width: 100%; display: flex; gap: 10px; }
+        input[type="text"] { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem; }
+        
+        #roomsList { width: 100%; margin-top: 10px; display: flex; flex-direction: column; gap: 10px; max-height: 300px; overflow-y: auto; }
+        .room-card { display: flex; justify-content: space-between; align-items: center; background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #ddd; }
+        .room-card.occupied { opacity: 0.6; }
+        .room-info { display: flex; flex-direction: column; }
+        .room-name { font-weight: bold; font-size: 1.1rem; }
+        .room-status { font-size: 0.9rem; color: #888; }
+        
+        #game-screen { width: 100%; }
+        .scoreboard { display: flex; justify-content: space-between; width: 100%; padding: 10px; background: #eee; border-radius: 8px; margin-bottom: 10px; }
+        .score { font-size: 1.5rem; font-weight: bold; }
+        #turnIndicator { text-align: center; font-size: 1.2rem; font-weight: bold; color: #764ba2; margin-bottom: 10px; }
+        .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; max-width: 350px; }
+        .cell { background: #f8f9fa; border: 2px solid #ddd; border-radius: 10px; aspect-ratio: 1; display: flex; justify-content: center; align-items: center; font-size: 3.5rem; font-weight: bold; cursor: pointer; }
+        .cell.x { color: #3498db; } .cell.o { color: #e74c3c; }
+        .cell.winner { background: #d4edda; border-color: #28a745; }
+        .cell.disabled { cursor: not-allowed; }
+        
+        .back-btn { position: absolute; top: 15px; left: 15px; padding: 8px 15px; font-size: 0.9rem; background: #6c757d; width: auto; }
+        .back-btn:hover { background: #5a6268; }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+        <!-- TELA 1: MENU -->
+        <div id="menu-screen" class="screen active">
+            <h1>🎮 Jogo da Velha</h1>
+            <div class="mode-option">
+                <button class="btn-primary" onclick="startLocalGame()">🤖 Jogar com a Máquina</button>
+                <button class="btn-primary" onclick="showOnlineScreen()">🌐 Jogar Online</button>
+            </div>
+        </div>
+
+        <!-- TELA 2: ONLINE -->
+        <div id="online-screen" class="screen">
+            <button class="back-btn" onclick="goToMenu()">⬅ Voltar</button>
+            <h2>Salas Ativas</h2>
+            
+            <div class="input-group">
+                <input type="text" id="newRoomName" placeholder="Nome da sua sala...">
+                <button class="btn-green" onclick="createRoom()">Criar Sala</button>
+            </div>
+            
+            <div id="roomsList">
+                <p style="text-align:center; color:#999;">Clique em "Atualizar" para ver as salas.</p>
+            </div>
+            
+            <button class="btn-blue" onclick="loadRooms()" style="margin-top: 10px;">🔄 Atualizar Salas</button>
+        </div>
+
+        <!-- TELA 3: JOGO -->
+        <div id="game-screen" class="screen">
+            <button class="back-btn" onclick="goToMenu()">⬅ Sair</button>
+            
+            <div class="scoreboard">
+                <div>
+                    <div id="player1Name">Você</div>
+                    <div class="score" id="player1Score">0</div>
+                </div>
+                <div>
+                    <div id="player2Name">Computador</div>
+                    <div class="score" id="player2Score">0</div>
+                </div>
+            </div>
+
+            <div id="turnIndicator">Vez de Você (❌)</div>
+            <div id="gameMessage" style="min-height: 24px; font-weight: bold; margin-bottom: 10px;"></div>
+
+            <div class="board" id="board">
+                <div class="cell" onclick="handleCellClick(0)"></div>
+                <div class="cell" onclick="handleCellClick(1)"></div>
+                <div class="cell" onclick="handleCellClick(2)"></div>
+                <div class="cell" onclick="handleCellClick(3)"></div>
+                <div class="cell" onclick="handleCellClick(4)"></div>
+                <div class="cell" onclick="handleCellClick(5)"></div>
+                <div class="cell" onclick="handleCellClick(6)"></div>
+                <div class="cell" onclick="handleCellClick(7)"></div>
+                <div class="cell" onclick="handleCellClick(8)"></div>
+            </div>
+
+            <button class="btn-danger" onclick="resetGame()" style="margin-top: 15px;">🔄 Reiniciar Jogo</button>
+        </div>
+
+    </div>
+
+    <script>
+        // CONFIGURAÇÃO SUPABASE
+        const SUPABASE_URL = 'https://zqsdlprkqllkjlbzekwk.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_2EwFsZCkBO-Mq7TqdZb1Eg_53rGGn_D';
+        let supabase;
+        try { supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY); } catch (e) { console.error(e); }
+
+        // ESTADO DO JOGO
+        let gameState = {
+            mode: 'local', board: Array(9).fill(null), currentPlayer: 'X', gameActive: true, isThinking: false, isWaiting: false,
+            players: { X: { name: 'Você', score: 0 }, O: { name: 'Computador', score: 0 } },
+            onlineRoomName: null, onlinePlayerRole: null
+        };
+
+        // NAVEGAÇÃO
+        function showScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(screen => screen.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+        }
+        function goToMenu() { showScreen('menu-screen'); resetGame(); }
+        function startLocalGame() {
+            gameState.mode = 'local'; gameState.players.X = { name: 'Você', score: 0 }; gameState.players.O = { name: 'Computador', score: 0 };
+            document.getElementById('player1Name').textContent = 'Você'; document.getElementById('player2Name').textContent = 'Computador';
+            showScreen('game-screen'); resetGame();
+        }
+        function showOnlineScreen() { gameState.mode = 'online'; showScreen('online-screen'); loadRooms(); }
+
+        // LÓGICA DO JOGO
+        function handleCellClick(index) {
+            if (!gameState.gameActive || gameState.isThinking || gameState.isWaiting || gameState.board[index]) return;
+            if (gameState.mode === 'local' && gameState.currentPlayer === 'O') return;
+            makeMove(index, gameState.currentPlayer);
+        }
+        function makeMove(index, player) {
+            gameState.board[index] = player;
+            const winner = checkWinner();
+            if (winner) {
+                gameState.gameActive = false;
+                document.getElementById('gameMessage').textContent = `🎉 ${gameState.players[winner].name} venceu!`;
+                if (winner === 'X') gameState.players.X.score++; else gameState.players.O.score++;
+                updateScoreboard(); updateTurnIndicator(); renderBoard(); return;
+            }
+            if (!gameState.board.includes(null)) {
+                gameState.gameActive = false;
+                document.getElementById('gameMessage').textContent = '🤝 Empate!';
+                updateTurnIndicator(); renderBoard(); return;
+            }
+            gameState.currentPlayer = gameState.currentPlayer === 'X' ? 'O' : 'X';
+            updateTurnIndicator(); renderBoard();
+            if (gameState.mode === 'local' && gameState.currentPlayer === 'O') {
+                gameState.isThinking = true;
+                document.getElementById('gameMessage').textContent = '🤖 Pensando...';
+                setTimeout(() => computerMove(), 600);
+            }
+        }
+        function computerMove() {
+            if (!gameState.gameActive) { gameState.isThinking = false; return; }
+            const emptyCells = gameState.board.map((cell, i) => cell === null ? i : null).filter(v => v !== null);
+            if (emptyCells.length === 0) { gameState.isThinking = false; return; }
+            let move = null;
+            for (const i of emptyCells) { gameState.board[i] = 'O'; if (checkWinner() === 'O') { move = i; gameState.board[i] = null; break; } gameState.board[i] = null; }
+            if (move === null) { for (const i of emptyCells) { gameState.board[i] = 'X'; if (checkWinner() === 'X') { move = i; gameState.board[i] = null; break; } gameState.board[i] = null; } }
+            if (move === null && emptyCells.includes(4)) move = 4;
+            if (move === null) move = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+            if (move !== null) makeMove(move, 'O');
+            gameState.isThinking = false; document.getElementById('gameMessage').textContent = '';
+        }
+        function checkWinner() {
+            const winPatterns = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+            for (const pattern of winPatterns) {
+                const [a, b, c] = pattern;
+                if (gameState.board[a] && gameState.board[a] === gameState.board[b] && gameState.board[a] === gameState.board[c]) return gameState.board[a];
+            }
+            return null;
+        }
+        function renderBoard() {
+            const cells = document.querySelectorAll('.cell');
+            const board = gameState.board;
+            cells.forEach((cell, index) => {
+                cell.textContent = board[index] || ''; cell.className = 'cell';
+                if (board[index] === 'X') cell.classList.add('x'); if (board[index] === 'O') cell.classList.add('o');
+                if (!gameState.gameActive || gameState.isThinking) cell.classList.add('disabled'); else cell.classList.remove('disabled');
+            });
+            updateScoreboard();
+        }
+        function updateScoreboard() {
+            document.getElementById('player1Score').textContent = gameState.players.X.score;
+            document.getElementById('player2Score').textContent = gameState.players.O.score;
+        }
+        function updateTurnIndicator() {
+            const indicator = document.getElementById('turnIndicator');
+            if (!gameState.gameActive) { indicator.textContent = '🏁 Fim de jogo'; return; }
+            const player = gameState.players[gameState.currentPlayer]; const symbol = gameState.currentPlayer === 'X' ? '❌' : '⭕';
+            indicator.textContent = `Vez de ${player.name} (${symbol})`;
+        }
+        function resetGame() {
+            gameState.board = Array(9).fill(null); gameState.currentPlayer = 'X'; gameState.gameActive = true; gameState.isThinking = false; gameState.isWaiting = false;
+            document.getElementById('gameMessage').textContent = ''; updateTurnIndicator(); renderBoard();
+        }
+
+        // LÓGICA ONLINE
+        async function createRoom() {
+            const roomName = document.getElementById('newRoomName').value.trim();
+            if (!roomName) { alert("Digite um nome para a sala!"); return; }
+            if (!supabase) { alert("Erro: Supabase não configurado!"); return; }
+            const { error } = await supabase.from('rooms').insert([{ id: roomName.toLowerCase().replace(/\s+/g, '-'), name: roomName, player1: 'host', player2: null, status: 'waiting' }]);
+            if (error) { alert("Erro ao criar sala: " + error.message); return; }
+            gameState.onlineRoomName = roomName; gameState.onlinePlayerRole = 'host';
+            document.getElementById('player1Name').textContent = 'Você (Host)'; document.getElementById('player2Name').textContent = 'Aguardando...';
+            gameState.mode = 'online'; gameState.players.X = { name: 'Você (Host)', score: 0 }; gameState.players.O = { name: 'Aguardando...', score: 0 };
+            showScreen('game-screen'); resetGame();
+        }
+        async function joinRoom(roomName, roomId) {
+            if (!supabase) { alert("Erro: Supabase não configurado!"); return; }
+            const { error } = await supabase.from('rooms').update({ player2: 'guest', status: 'full' }).eq('id', roomId);
+            if (error) { alert("Sala cheia ou erro: " + error.message); return; }
+            gameState.onlineRoomName = roomName; gameState.onlinePlayerRole = 'guest';
+            document.getElementById('player1Name').textContent = 'Você (Convidado)'; document.getElementById('player2Name').textContent = 'Host';
+            gameState.mode = 'online'; gameState.players.X = { name: 'Você (Convidado)', score: 0 }; gameState.players.O = { name: 'Host', score: 0 };
+            showScreen('game-screen'); resetGame();
+        }
+        async function loadRooms() {
+            const roomsList = document.getElementById('roomsList');
+            roomsList.innerHTML = '<p style="text-align:center; color:#999;">🔄 Carregando salas...</p>';
+            if (!supabase) { roomsList.innerHTML = '<p style="text-align:center; color:#999;">🚫 Supabase não conectado</p>'; return; }
+            try {
+                const { data: rooms, error } = await supabase.from('rooms').select('*');
+                if (error) { roomsList.innerHTML = '<p style="text-align:center; color:#999;">🚫 Nenhuma sala ativa no momento.</p>'; return; }
+                if (rooms.length === 0) { roomsList.innerHTML = '<p style="text-align:center; color:#999;">🚫 Não tem salas ativas no momento.</p>'; }
+                else {
+                    roomsList.innerHTML = '';
+                    rooms.forEach(room => {
+                        const isFull = room.status === 'full';
+                        const div = document.createElement('div'); div.className = 'room-card' + (isFull ? ' occupied' : '');
+                        div.innerHTML = `<div class="room-info"><div class="room-name">${room.name}</div><div class="room-status">${isFull ? '👥 Ocupada' : '🟢 Ativa (1/2)'}</div></div>${isFull ? '<button style="width: auto; padding: 8px 15px; background: #6c757d; cursor: not-allowed;" disabled>Cheia</button>' : '<button class="btn-green" style="width: auto; padding: 8px 15px;" onclick="joinRoom(\'' + room.name + '\', \'' + room.id + '\')">Entrar</button>'}`;
+                        roomsList.appendChild(div);
+                    });
+                }
+            } catch (e) { roomsList.innerHTML = '<p style="text-align:center; color:#999;">🚫 Erro ao buscar salas.</p>'; }
+        }
+
+        // INICIALIZAÇÃO
+        document.addEventListener('DOMContentLoaded', () => {
+            showScreen('menu-screen'); resetGame();
+        });
+    </script>
+</body>
+</html>
