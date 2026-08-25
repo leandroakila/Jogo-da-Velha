@@ -125,17 +125,13 @@
         const SUPABASE_URL = 'https://zqsdlprkqllkjlbzekwk.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_2EwFsZCkBO-Mq7TqdZb1Eg_53rGGn_D';
         
-        // Cria o cliente do Supabase manualmente, SEM depender do CDN
-        // (Usa a API fetch para se conectar direto)
+        // Cria o cliente do Supabase manualmente (sem CDN)
         const supabase = {
             from: function(table) {
                 return {
                     select: async function() {
                         const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*`, {
-                            headers: {
-                                'apikey': SUPABASE_ANON_KEY,
-                                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                            }
+                            headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
                         });
                         const data = await response.json();
                         return { data, error: null };
@@ -143,12 +139,7 @@
                     insert: async function(values) {
                         const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
                             method: 'POST',
-                            headers: {
-                                'apikey': SUPABASE_ANON_KEY,
-                                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                                'Content-Type': 'application/json',
-                                'Prefer': 'return=minimal'
-                            },
+                            headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
                             body: JSON.stringify(values)
                         });
                         return { error: response.ok ? null : { message: 'Erro ao inserir' } };
@@ -157,12 +148,7 @@
                         const roomId = this.roomId;
                         const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${roomId}`, {
                             method: 'PATCH',
-                            headers: {
-                                'apikey': SUPABASE_ANON_KEY,
-                                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                                'Content-Type': 'application/json',
-                                'Prefer': 'return=minimal'
-                            },
+                            headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
                             body: JSON.stringify(values)
                         });
                         return { error: response.ok ? null : { message: 'Erro ao atualizar' } };
@@ -188,7 +174,9 @@
                 O: { name: 'Computador', score: 0 }
             },
             onlineRoomName: null,
-            onlinePlayerRole: null
+            onlinePlayerRole: null,
+            onlineMove: false,
+            intervalId: null
         };
 
         // ====== NAVEGAÇÃO ======
@@ -216,30 +204,61 @@
         function handleCellClick(index) {
             if (!gameState.gameActive || gameState.isThinking || gameState.isWaiting || gameState.board[index]) return;
             if (gameState.mode === 'local' && gameState.currentPlayer === 'O') return;
+            if (gameState.mode === 'online' && gameState.onlineMove === false) return;
+            
             makeMove(index, gameState.currentPlayer);
         }
+        
+        // Adiciona a lógica para enviar jogadas online
+        async function sendOnlineMove(index, player) {
+            if (gameState.mode !== 'online' || !gameState.onlineRoomName) return;
+            
+            // Atualiza o tabuleiro no banco de dados
+            const { error } = await supabase.from('rooms').update({ 
+                board_state: JSON.stringify(gameState.board),
+                current_turn: gameState.currentPlayer
+            }).eq('id', gameState.onlineRoomName.toLowerCase());
+            
+            if (error) console.error("Erro ao enviar jogada:", error);
+        }
+        
         function makeMove(index, player) {
             gameState.board[index] = player;
             const winner = checkWinner();
+            
             if (winner) {
                 gameState.gameActive = false;
                 document.getElementById('gameMessage').textContent = `🎉 ${gameState.players[winner].name} venceu!`;
                 if (winner === 'X') gameState.players.X.score++; else gameState.players.O.score++;
-                updateScoreboard(); updateTurnIndicator(); renderBoard(); return;
+                updateScoreboard(); updateTurnIndicator(); renderBoard();
+                if (gameState.mode === 'online') sendOnlineMove(index, player);
+                return;
             }
+            
             if (!gameState.board.includes(null)) {
                 gameState.gameActive = false;
                 document.getElementById('gameMessage').textContent = '🤝 Empate!';
-                updateTurnIndicator(); renderBoard(); return;
+                updateTurnIndicator(); renderBoard();
+                if (gameState.mode === 'online') sendOnlineMove(index, player);
+                return;
             }
+            
             gameState.currentPlayer = gameState.currentPlayer === 'X' ? 'O' : 'X';
             updateTurnIndicator(); renderBoard();
+            
+            if (gameState.mode === 'online') {
+                gameState.onlineMove = false;
+                sendOnlineMove(index, player);
+                return;
+            }
+            
             if (gameState.mode === 'local' && gameState.currentPlayer === 'O') {
                 gameState.isThinking = true;
                 document.getElementById('gameMessage').textContent = '🤖 Pensando...';
                 setTimeout(() => computerMove(), 600);
             }
         }
+        
         function computerMove() {
             if (!gameState.gameActive) { gameState.isThinking = false; return; }
             const emptyCells = gameState.board.map((cell, i) => cell === null ? i : null).filter(v => v !== null);
@@ -250,8 +269,10 @@
             if (move === null && emptyCells.includes(4)) move = 4;
             if (move === null) move = emptyCells[Math.floor(Math.random() * emptyCells.length)];
             if (move !== null) makeMove(move, 'O');
-            gameState.isThinking = false; document.getElementById('gameMessage').textContent = '';
+            gameState.isThinking = false;
+            document.getElementById('gameMessage').textContent = '';
         }
+        
         function checkWinner() {
             const winPatterns = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
             for (const pattern of winPatterns) {
@@ -260,67 +281,137 @@
             }
             return null;
         }
+        
         function renderBoard() {
             const cells = document.querySelectorAll('.cell');
             const board = gameState.board;
             cells.forEach((cell, index) => {
                 cell.textContent = board[index] || ''; cell.className = 'cell';
                 if (board[index] === 'X') cell.classList.add('x'); if (board[index] === 'O') cell.classList.add('o');
-                if (!gameState.gameActive || gameState.isThinking) cell.classList.add('disabled'); else cell.classList.remove('disabled');
+                if (!gameState.gameActive || gameState.isThinking || (gameState.mode === 'online' && !gameState.onlineMove)) cell.classList.add('disabled');
+                else cell.classList.remove('disabled');
             });
             updateScoreboard();
         }
+        
         function updateScoreboard() {
             document.getElementById('player1Score').textContent = gameState.players.X.score;
             document.getElementById('player2Score').textContent = gameState.players.O.score;
         }
+        
         function updateTurnIndicator() {
             const indicator = document.getElementById('turnIndicator');
             if (!gameState.gameActive) { indicator.textContent = '🏁 Fim de jogo'; return; }
-            const player = gameState.players[gameState.currentPlayer]; const symbol = gameState.currentPlayer === 'X' ? '❌' : '⭕';
+            const player = gameState.players[gameState.currentPlayer];
+            const symbol = gameState.currentPlayer === 'X' ? '❌' : '⭕';
             indicator.textContent = `Vez de ${player.name} (${symbol})`;
         }
+        
         function resetGame() {
-            gameState.board = Array(9).fill(null); gameState.currentPlayer = 'X'; gameState.gameActive = true; gameState.isThinking = false; gameState.isWaiting = false;
-            document.getElementById('gameMessage').textContent = ''; updateTurnIndicator(); renderBoard();
+            gameState.board = Array(9).fill(null);
+            gameState.currentPlayer = 'X';
+            gameState.gameActive = true;
+            gameState.isThinking = false;
+            gameState.isWaiting = false;
+            gameState.onlineMove = (gameState.mode === 'online' && gameState.onlinePlayerRole === 'host');
+            document.getElementById('gameMessage').textContent = '';
+            updateTurnIndicator(); renderBoard();
         }
 
         // ====== LÓGICA ONLINE ======
         async function createRoom() {
             const roomName = document.getElementById('newRoomName').value.trim();
             if (!roomName) { alert("Digite um nome para a sala!"); return; }
-            const { error } = await supabase.from('rooms').insert([{ id: roomName.toLowerCase().replace(/\s+/g, '-'), name: roomName, player1: 'host', player2: null, status: 'waiting' }]);
+            
+            const { error } = await supabase.from('rooms').insert([{ 
+                id: roomName.toLowerCase().replace(/\s+/g, '-'), 
+                name: roomName, 
+                player1: 'host', 
+                player2: null, 
+                status: 'waiting',
+                board_state: JSON.stringify(Array(9).fill(null)),
+                current_turn: 'X'
+            }]);
+            
             if (error) { alert("Erro ao criar sala: " + error.message); return; }
-            gameState.onlineRoomName = roomName; gameState.onlinePlayerRole = 'host';
-            document.getElementById('player1Name').textContent = 'Você (Host)'; document.getElementById('player2Name').textContent = 'Aguardando...';
-            gameState.mode = 'online'; gameState.players.X = { name: 'Você (Host)', score: 0 }; gameState.players.O = { name: 'Aguardando...', score: 0 };
-            showScreen('game-screen'); resetGame();
+            
+            gameState.onlineRoomName = roomName;
+            gameState.onlinePlayerRole = 'host';
+            gameState.onlineMove = true; // Host começa jogando
+            
+            document.getElementById('player1Name').textContent = 'Você (Host)';
+            document.getElementById('player2Name').textContent = 'Aguardando...';
+            gameState.mode = 'online';
+            gameState.players.X = { name: 'Você (Host)', score: 0 };
+            gameState.players.O = { name: 'Aguardando...', score: 0 };
+            
+            showScreen('game-screen');
+            resetGame();
+            
+            // Inicia a verificação automática a cada 2 segundos
+            gameState.intervalId = setInterval(() => {
+                verificarOponente();
+            }, 2000);
         }
+        
         async function joinRoom(roomName, roomId) {
-            const { error } = await supabase.from('rooms').update({ player2: 'guest', status: 'full' }).eq('id', roomId);
+            const { error } = await supabase.from('rooms').update({ 
+                player2: 'guest', 
+                status: 'full' 
+            }).eq('id', roomId);
+            
             if (error) { alert("Sala cheia ou erro: " + error.message); return; }
-            gameState.onlineRoomName = roomName; gameState.onlinePlayerRole = 'guest';
-            document.getElementById('player1Name').textContent = 'Você (Convidado)'; document.getElementById('player2Name').textContent = 'Host';
-            gameState.mode = 'online'; gameState.players.X = { name: 'Você (Convidado)', score: 0 }; gameState.players.O = { name: 'Host', score: 0 };
-            showScreen('game-screen'); resetGame();
+            
+            gameState.onlineRoomName = roomName;
+            gameState.onlinePlayerRole = 'guest';
+            gameState.onlineMove = false; // Convidado espera o Host jogar
+            
+            document.getElementById('player1Name').textContent = 'Você (Convidado)';
+            document.getElementById('player2Name').textContent = 'Host';
+            gameState.mode = 'online';
+            gameState.players.X = { name: 'Você (Convidado)', score: 0 };
+            gameState.players.O = { name: 'Host', score: 0 };
+            
+            showScreen('game-screen');
+            resetGame();
+            
+            // Inicia a verificação automática para ver as jogadas do Host
+            gameState.intervalId = setInterval(() => {
+                verificarJogadas();
+            }, 2000);
         }
-        async function loadRooms() {
-            const roomsList = document.getElementById('roomsList');
-            roomsList.innerHTML = '<p style="text-align:center; color:#999;">🔄 Carregando salas...</p>';
-            try {
-                const { data: rooms, error } = await supabase.from('rooms').select();
-                if (error) { roomsList.innerHTML = '<p style="text-align:center; color:#999;">🚫 Nenhuma sala ativa no momento.</p>'; return; }
-                if (rooms.length === 0) { roomsList.innerHTML = '<p style="text-align:center; color:#999;">🚫 Não tem salas ativas no momento.</p>'; }
-                else {
-                    roomsList.innerHTML = '';
-                    rooms.forEach(room => {
-                        const isFull = room.status === 'full';
-                        const div = document.createElement('div'); div.className = 'room-card' + (isFull ? ' occupied' : '');
-                        div.innerHTML = `<div class="room-info"><div class="room-name">${room.name}</div><div class="room-status">${isFull ? '👥 Ocupada' : '🟢 Ativa (1/2)'}</div></div>${isFull ? '<button style="width: auto; padding: 8px 15px; background: #6c757d; cursor: not-allowed;" disabled>Cheia</button>' : '<button class="btn-green" style="width: auto; padding: 8px 15px;" onclick="joinRoom(\'' + room.name + '\', \'' + room.id + '\')">Entrar</button>'}`;
-                        roomsList.appendChild(div);
-                    });
+        
+        // Verifica se o oponente entrou (para o Host)
+        async function verificarOponente() {
+            const { data: room } = await supabase.from('rooms').select().eq('id', gameState.onlineRoomName.toLowerCase());
+            
+            if (room && room[0].player2 !== null) {
+                document.getElementById('player2Name').textContent = 'Oponente';
+                document.getElementById('gameMessage').textContent = '🎮 Partida iniciada!';
+                clearInterval(gameState.intervalId);
+                gameState.onlineMove = true;
+                updateTurnIndicator();
+                renderBoard();
+            }
+        }
+        
+        // Verifica as jogadas do oponente (para o Convidado)
+        async function verificarJogadas() {
+            const { data: room } = await supabase.from('rooms').select().eq('id', gameState.onlineRoomName.toLowerCase());
+            
+            if (room && room[0].board_state) {
+                const boardState = JSON.parse(room[0].board_state);
+                const turn = room[0].current_turn;
+                
+                // Se a vez mudou para mim, atualizo o tabuleiro
+                if (turn !== gameState.currentPlayer) {
+                    gameState.board = boardState;
+                    gameState.currentPlayer = turn;
+                    gameState.onlineMove = (turn === 'X' && gameState.onlinePlayerRole === 'guest') || (turn === 'O' && gameState.onlinePlayerRole === 'host');
+                    updateTurnIndicator();
+                    renderBoard();
                 }
-            } catch (e) { roomsList.innerHTML = '<p style="text-align:center; color:#999;">🚫 Erro ao buscar salas.</p>'; }
+            }
         }
 
         // ====== INICIALIZAÇÃO ======
