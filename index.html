@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jogo da Velha</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; justify-content: center; align-items: center; color: #333; }
@@ -122,13 +121,7 @@
     </div>
 
     <script>
-        // CONFIGURAÇÃO SUPABASE
-        const SUPABASE_URL = 'https://zqsdlprkqllkjlbzekwk.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_2EwFsZCkBO-Mq7TqdZb1Eg_53rGGn_D';
-        let supabase;
-        try { supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY); } catch (e) { console.error(e); }
-
-        // ESTADO DO JOGO
+        // ====== LÓGICA DO JOGO (Funciona 100% sem internet) ======
         let gameState = {
             mode: 'local', board: Array(9).fill(null), currentPlayer: 'X', gameActive: true, isThinking: false, isWaiting: false,
             players: { X: { name: 'Você', score: 0 }, O: { name: 'Computador', score: 0 } },
@@ -221,11 +214,31 @@
             document.getElementById('gameMessage').textContent = ''; updateTurnIndicator(); renderBoard();
         }
 
-        // LÓGICA ONLINE
+        // ====== LÓGICA ONLINE (Tenta conectar, mas não trava o site) ======
+        // Configuração Supabase (colocada aqui para o site não travar)
+        const SUPABASE_URL = 'https://zqsdlprkqllkjlbzekwk.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_2EwFsZCkBO-Mq7TqdZb1Eg_53rGGn_D';
+        let supabase;
+        try {
+            // Tenta carregar a biblioteca dinamicamente
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+            script.onload = () => {
+                supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                console.log("Supabase conectado!");
+            };
+            script.onerror = () => {
+                console.warn("Biblioteca Supabase não carregou. Modo online indisponível.");
+            };
+            document.head.appendChild(script);
+        } catch (e) {
+            console.error("Erro ao conectar Supabase:", e);
+        }
+
         async function createRoom() {
             const roomName = document.getElementById('newRoomName').value.trim();
             if (!roomName) { alert("Digite um nome para a sala!"); return; }
-            if (!supabase) { alert("Erro: Supabase não configurado!"); return; }
+            if (!supabase) { alert("O modo online não está disponível. Tente novamente mais tarde."); return; }
             const { error } = await supabase.from('rooms').insert([{ id: roomName.toLowerCase().replace(/\s+/g, '-'), name: roomName, player1: 'host', player2: null, status: 'waiting' }]);
             if (error) { alert("Erro ao criar sala: " + error.message); return; }
             gameState.onlineRoomName = roomName; gameState.onlinePlayerRole = 'host';
@@ -233,8 +246,9 @@
             gameState.mode = 'online'; gameState.players.X = { name: 'Você (Host)', score: 0 }; gameState.players.O = { name: 'Aguardando...', score: 0 };
             showScreen('game-screen'); resetGame();
         }
+
         async function joinRoom(roomName, roomId) {
-            if (!supabase) { alert("Erro: Supabase não configurado!"); return; }
+            if (!supabase) { alert("O modo online não está disponível. Tente novamente mais tarde."); return; }
             const { error } = await supabase.from('rooms').update({ player2: 'guest', status: 'full' }).eq('id', roomId);
             if (error) { alert("Sala cheia ou erro: " + error.message); return; }
             gameState.onlineRoomName = roomName; gameState.onlinePlayerRole = 'guest';
@@ -242,6 +256,7 @@
             gameState.mode = 'online'; gameState.players.X = { name: 'Você (Convidado)', score: 0 }; gameState.players.O = { name: 'Host', score: 0 };
             showScreen('game-screen'); resetGame();
         }
+
         async function loadRooms() {
             const roomsList = document.getElementById('roomsList');
             roomsList.innerHTML = '<p style="text-align:center; color:#999;">🔄 Carregando salas...</p>';
