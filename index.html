@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jogo da Velha</title>
+    <title>Jogo da Velha - Online</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; justify-content: center; align-items: center; color: #333; }
@@ -121,27 +121,98 @@
     </div>
 
     <script>
-        // ====== LÓGICA DO JOGO (Funciona 100% sem internet) ======
-        let gameState = {
-            mode: 'local', board: Array(9).fill(null), currentPlayer: 'X', gameActive: true, isThinking: false, isWaiting: false,
-            players: { X: { name: 'Você', score: 0 }, O: { name: 'Computador', score: 0 } },
-            onlineRoomName: null, onlinePlayerRole: null
+        // ====== CONFIGURAÇÃO SUPABASE ======
+        const SUPABASE_URL = 'https://zqsdlprkqllkjlbzekwk.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_2EwFsZCkBO-Mq7TqdZb1Eg_53rGGn_D';
+        
+        // Cria o cliente do Supabase manualmente, SEM depender do CDN
+        // (Usa a API fetch para se conectar direto)
+        const supabase = {
+            from: function(table) {
+                return {
+                    select: async function() {
+                        const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*`, {
+                            headers: {
+                                'apikey': SUPABASE_ANON_KEY,
+                                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                            }
+                        });
+                        const data = await response.json();
+                        return { data, error: null };
+                    },
+                    insert: async function(values) {
+                        const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+                            method: 'POST',
+                            headers: {
+                                'apikey': SUPABASE_ANON_KEY,
+                                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                                'Content-Type': 'application/json',
+                                'Prefer': 'return=minimal'
+                            },
+                            body: JSON.stringify(values)
+                        });
+                        return { error: response.ok ? null : { message: 'Erro ao inserir' } };
+                    },
+                    update: async function(values) {
+                        const roomId = this.roomId;
+                        const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${roomId}`, {
+                            method: 'PATCH',
+                            headers: {
+                                'apikey': SUPABASE_ANON_KEY,
+                                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                                'Content-Type': 'application/json',
+                                'Prefer': 'return=minimal'
+                            },
+                            body: JSON.stringify(values)
+                        });
+                        return { error: response.ok ? null : { message: 'Erro ao atualizar' } };
+                    },
+                    eq: function(column, value) {
+                        this.roomId = value;
+                        return this;
+                    }
+                };
+            }
         };
 
-        // NAVEGAÇÃO
+        // ====== ESTADO DO JOGO ======
+        let gameState = {
+            mode: 'local',
+            board: Array(9).fill(null),
+            currentPlayer: 'X',
+            gameActive: true,
+            isThinking: false,
+            isWaiting: false,
+            players: {
+                X: { name: 'Você', score: 0 },
+                O: { name: 'Computador', score: 0 }
+            },
+            onlineRoomName: null,
+            onlinePlayerRole: null
+        };
+
+        // ====== NAVEGAÇÃO ======
         function showScreen(screenId) {
             document.querySelectorAll('.screen').forEach(screen => screen.classList.remove('active'));
             document.getElementById(screenId).classList.add('active');
         }
         function goToMenu() { showScreen('menu-screen'); resetGame(); }
         function startLocalGame() {
-            gameState.mode = 'local'; gameState.players.X = { name: 'Você', score: 0 }; gameState.players.O = { name: 'Computador', score: 0 };
-            document.getElementById('player1Name').textContent = 'Você'; document.getElementById('player2Name').textContent = 'Computador';
-            showScreen('game-screen'); resetGame();
+            gameState.mode = 'local';
+            gameState.players.X = { name: 'Você', score: 0 };
+            gameState.players.O = { name: 'Computador', score: 0 };
+            document.getElementById('player1Name').textContent = 'Você';
+            document.getElementById('player2Name').textContent = 'Computador';
+            showScreen('game-screen');
+            resetGame();
         }
-        function showOnlineScreen() { gameState.mode = 'online'; showScreen('online-screen'); loadRooms(); }
+        function showOnlineScreen() {
+            gameState.mode = 'online';
+            showScreen('online-screen');
+            loadRooms();
+        }
 
-        // LÓGICA DO JOGO
+        // ====== LÓGICA DO JOGO ======
         function handleCellClick(index) {
             if (!gameState.gameActive || gameState.isThinking || gameState.isWaiting || gameState.board[index]) return;
             if (gameState.mode === 'local' && gameState.currentPlayer === 'O') return;
@@ -214,31 +285,10 @@
             document.getElementById('gameMessage').textContent = ''; updateTurnIndicator(); renderBoard();
         }
 
-        // ====== LÓGICA ONLINE (Tenta conectar, mas não trava o site) ======
-        // Configuração Supabase (colocada aqui para o site não travar)
-        const SUPABASE_URL = 'https://zqsdlprkqllkjlbzekwk.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_2EwFsZCkBO-Mq7TqdZb1Eg_53rGGn_D';
-        let supabase;
-        try {
-            // Tenta carregar a biblioteca dinamicamente
-            const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
-            script.onload = () => {
-                supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-                console.log("Supabase conectado!");
-            };
-            script.onerror = () => {
-                console.warn("Biblioteca Supabase não carregou. Modo online indisponível.");
-            };
-            document.head.appendChild(script);
-        } catch (e) {
-            console.error("Erro ao conectar Supabase:", e);
-        }
-
+        // ====== LÓGICA ONLINE ======
         async function createRoom() {
             const roomName = document.getElementById('newRoomName').value.trim();
             if (!roomName) { alert("Digite um nome para a sala!"); return; }
-            if (!supabase) { alert("O modo online não está disponível. Tente novamente mais tarde."); return; }
             const { error } = await supabase.from('rooms').insert([{ id: roomName.toLowerCase().replace(/\s+/g, '-'), name: roomName, player1: 'host', player2: null, status: 'waiting' }]);
             if (error) { alert("Erro ao criar sala: " + error.message); return; }
             gameState.onlineRoomName = roomName; gameState.onlinePlayerRole = 'host';
@@ -246,9 +296,7 @@
             gameState.mode = 'online'; gameState.players.X = { name: 'Você (Host)', score: 0 }; gameState.players.O = { name: 'Aguardando...', score: 0 };
             showScreen('game-screen'); resetGame();
         }
-
         async function joinRoom(roomName, roomId) {
-            if (!supabase) { alert("O modo online não está disponível. Tente novamente mais tarde."); return; }
             const { error } = await supabase.from('rooms').update({ player2: 'guest', status: 'full' }).eq('id', roomId);
             if (error) { alert("Sala cheia ou erro: " + error.message); return; }
             gameState.onlineRoomName = roomName; gameState.onlinePlayerRole = 'guest';
@@ -256,13 +304,11 @@
             gameState.mode = 'online'; gameState.players.X = { name: 'Você (Convidado)', score: 0 }; gameState.players.O = { name: 'Host', score: 0 };
             showScreen('game-screen'); resetGame();
         }
-
         async function loadRooms() {
             const roomsList = document.getElementById('roomsList');
             roomsList.innerHTML = '<p style="text-align:center; color:#999;">🔄 Carregando salas...</p>';
-            if (!supabase) { roomsList.innerHTML = '<p style="text-align:center; color:#999;">🚫 Supabase não conectado</p>'; return; }
             try {
-                const { data: rooms, error } = await supabase.from('rooms').select('*');
+                const { data: rooms, error } = await supabase.from('rooms').select();
                 if (error) { roomsList.innerHTML = '<p style="text-align:center; color:#999;">🚫 Nenhuma sala ativa no momento.</p>'; return; }
                 if (rooms.length === 0) { roomsList.innerHTML = '<p style="text-align:center; color:#999;">🚫 Não tem salas ativas no momento.</p>'; }
                 else {
@@ -277,7 +323,7 @@
             } catch (e) { roomsList.innerHTML = '<p style="text-align:center; color:#999;">🚫 Erro ao buscar salas.</p>'; }
         }
 
-        // INICIALIZAÇÃO
+        // ====== INICIALIZAÇÃO ======
         document.addEventListener('DOMContentLoaded', () => {
             showScreen('menu-screen'); resetGame();
         });
