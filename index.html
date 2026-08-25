@@ -153,6 +153,14 @@
                         });
                         return { error: response.ok ? null : { message: 'Erro ao atualizar' } };
                     },
+                    delete: async function() {
+                        const roomId = this.roomId;
+                        const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${roomId}`, {
+                            method: 'DELETE',
+                            headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
+                        });
+                        return { error: response.ok ? null : { message: 'Erro ao apagar' } };
+                    },
                     eq: function(column, value) {
                         this.roomId = value;
                         return this;
@@ -184,7 +192,18 @@
             document.querySelectorAll('.screen').forEach(screen => screen.classList.remove('active'));
             document.getElementById(screenId).classList.add('active');
         }
-        function goToMenu() { showScreen('menu-screen'); resetGame(); }
+        
+        // FUNÇÃO SAIR (Agora APAGA a sala se estiver online)
+        async function goToMenu() {
+            // Se estiver no modo online, apaga a sala automaticamente
+            if (gameState.mode === 'online' && gameState.onlineRoomName) {
+                await supabase.from('rooms').delete().eq('id', gameState.onlineRoomName.toLowerCase());
+                clearInterval(gameState.intervalId); // Para de monitorar
+            }
+            showScreen('menu-screen');
+            resetGame();
+        }
+        
         function startLocalGame() {
             gameState.mode = 'local';
             gameState.players.X = { name: 'Você', score: 0 };
@@ -209,14 +228,14 @@
             makeMove(index, gameState.currentPlayer);
         }
         
-        // Adiciona a lógica para enviar jogadas online
-        async function sendOnlineMove(index, player) {
+        async function sendOnlineMove() {
             if (gameState.mode !== 'online' || !gameState.onlineRoomName) return;
             
-            // Atualiza o tabuleiro no banco de dados
+            const currentTime = new Date().toISOString();
             const { error } = await supabase.from('rooms').update({ 
                 board_state: JSON.stringify(gameState.board),
-                current_turn: gameState.currentPlayer
+                current_turn: gameState.currentPlayer,
+                last_active: currentTime
             }).eq('id', gameState.onlineRoomName.toLowerCase());
             
             if (error) console.error("Erro ao enviar jogada:", error);
@@ -231,7 +250,7 @@
                 document.getElementById('gameMessage').textContent = `🎉 ${gameState.players[winner].name} venceu!`;
                 if (winner === 'X') gameState.players.X.score++; else gameState.players.O.score++;
                 updateScoreboard(); updateTurnIndicator(); renderBoard();
-                if (gameState.mode === 'online') sendOnlineMove(index, player);
+                sendOnlineMove();
                 return;
             }
             
@@ -239,7 +258,7 @@
                 gameState.gameActive = false;
                 document.getElementById('gameMessage').textContent = '🤝 Empate!';
                 updateTurnIndicator(); renderBoard();
-                if (gameState.mode === 'online') sendOnlineMove(index, player);
+                sendOnlineMove();
                 return;
             }
             
@@ -248,7 +267,7 @@
             
             if (gameState.mode === 'online') {
                 gameState.onlineMove = false;
-                sendOnlineMove(index, player);
+                sendOnlineMove();
                 return;
             }
             
@@ -319,9 +338,20 @@
         }
 
         // ====== LÓGICA ONLINE ======
+        
+        // Atualiza o tempo de atividade para não expirar
+        async function updateLastActive() {
+            if (gameState.mode === 'online' && gameState.onlineRoomName) {
+                const currentTime = new Date().toISOString();
+                await supabase.from('rooms').update({ last_active: currentTime }).eq('id', gameState.onlineRoomName.toLowerCase());
+            }
+        }
+
         async function createRoom() {
             const roomName = document.getElementById('newRoomName').value.trim();
             if (!roomName) { alert("Digite um nome para a sala!"); return; }
+            
+            const currentTime = new Date().toISOString();
             
             const { error } = await supabase.from('rooms').insert([{ 
                 id: roomName.toLowerCase().replace(/\s+/g, '-'), 
@@ -330,7 +360,8 @@
                 player2: null, 
                 status: 'waiting',
                 board_state: JSON.stringify(Array(9).fill(null)),
-                current_turn: 'X'
+                current_turn: 'X',
+                last_active: currentTime
             }]);
             
             if (error) { alert("Erro ao criar sala: " + error.message); return; }
@@ -357,7 +388,8 @@
         async function joinRoom(roomName, roomId) {
             const { error } = await supabase.from('rooms').update({ 
                 player2: 'guest', 
-                status: 'full' 
+                status: 'full',
+                last_active: new Date().toISOString()
             }).eq('id', roomId);
             
             if (error) { alert("Sala cheia ou erro: " + error.message); return; }
@@ -375,7 +407,7 @@
             showScreen('game-screen');
             resetGame();
             
-            // Inicia a verificação automática para ver as jogadas do Host
+            // Inicia la verificação automática para ver as jogadas do Host
             gameState.intervalId = setInterval(() => {
                 verificarJogadas();
             }, 2000);
@@ -392,6 +424,11 @@
                 gameState.onlineMove = true;
                 updateTurnIndicator();
                 renderBoard();
+                
+                // Inicia a verificação de jogadas
+                gameState.intervalId = setInterval(() => {
+                    verificarJogadas();
+                }, 2000);
             }
         }
         
