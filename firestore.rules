@@ -1,0 +1,34 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signed() { return request.auth != null; }
+    function participant(d) { return signed() && (d.host == request.auth.uid || d.guest == request.auth.uid); }
+    function won(b) {
+      return (b.a != '' && b.a == b.b && b.b == b.c) || (b.d != '' && b.d == b.e && b.e == b.f) ||
+        (b.g != '' && b.g == b.h && b.h == b.i) || (b.a != '' && b.a == b.d && b.d == b.g) ||
+        (b.b != '' && b.b == b.e && b.e == b.h) || (b.c != '' && b.c == b.f && b.f == b.i) ||
+        (b.a != '' && b.a == b.e && b.e == b.i) || (b.c != '' && b.c == b.e && b.e == b.g);
+    }
+    function full(b) { return b.a != '' && b.b != '' && b.c != '' && b.d != '' && b.e != '' && b.f != '' && b.g != '' && b.h != '' && b.i != ''; }
+    function empty(b) { return b == {'a':'','b':'','c':'','d':'','e':'','f':'','g':'','h':'','i':''}; }
+    match /rooms/{room} {
+      allow get: if signed();
+      allow list, delete: if false;
+      allow create: if signed() && room.size() == 32 && request.resource.data.keys().hasOnly(['host','guest','board','turn','move']) && request.resource.data.keys().hasAll(['host','guest','board','turn','move']) && request.resource.data.host == request.auth.uid && request.resource.data.guest == '' && request.resource.data.turn == 'X' && request.resource.data.move == '' && empty(request.resource.data.board);
+      allow update: if signed() && (
+        (resource.data.guest == '' && resource.data.host != request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['guest']) && request.resource.data.guest == request.auth.uid)
+        ||
+        (participant(resource.data) && resource.data.guest != '' && !won(resource.data.board) && !full(resource.data.board) &&
+          ((resource.data.turn == 'X' && request.auth.uid == resource.data.host) || (resource.data.turn == 'O' && request.auth.uid == resource.data.guest)) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['board','turn','move']) &&
+          request.resource.data.move in ['a','b','c','d','e','f','g','h','i'] &&
+          resource.data.board[request.resource.data.move] == '' && request.resource.data.board[request.resource.data.move] == resource.data.turn &&
+          request.resource.data.board.diff(resource.data.board).affectedKeys().hasOnly([request.resource.data.move]) &&
+          request.resource.data.turn == (resource.data.turn == 'X' ? 'O' : 'X'))
+        ||
+        (participant(resource.data) && resource.data.guest != '' && (won(resource.data.board) || full(resource.data.board)) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['board','turn','move']) && empty(request.resource.data.board) && request.resource.data.turn == 'X' && request.resource.data.move == '')
+      );
+    }
+  }
+}
