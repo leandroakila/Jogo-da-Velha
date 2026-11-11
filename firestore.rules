@@ -11,6 +11,29 @@ service cloud.firestore {
     }
     function full(b) { return b.a != '' && b.b != '' && b.c != '' && b.d != '' && b.e != '' && b.f != '' && b.g != '' && b.h != '' && b.i != ''; }
     function empty(b) { return b == {'a':'','b':'','c':'','d':'','e':'','f':'','g':'','h':'','i':''}; }
+    match /lobby/{room} {
+      allow get, list: if signed();
+      allow create: if signed() && room.size() == 32 &&
+        request.resource.data.keys().hasOnly(['createdAt']) && request.resource.data.createdAt == request.time &&
+        !exists(/databases/$(database)/documents/rooms/$(room)) &&
+        getAfter(/databases/$(database)/documents/rooms/$(room)).data.host == request.auth.uid &&
+        getAfter(/databases/$(database)/documents/rooms/$(room)).data.guest == '';
+      allow update: if false;
+      allow delete: if signed() && (
+        get(/databases/$(database)/documents/rooms/$(room)).data.host == request.auth.uid ||
+        (get(/databases/$(database)/documents/rooms/$(room)).data.guest == '' &&
+         getAfter(/databases/$(database)/documents/rooms/$(room)).data.guest == request.auth.uid));
+    }
+    match /rooms/{room}/messages/{message} {
+      allow read: if participant(get(/databases/$(database)/documents/rooms/$(room)).data);
+      allow create: if participant(get(/databases/$(database)/documents/rooms/$(room)).data) &&
+        request.resource.data.keys().hasOnly(['sender','text','createdAt']) &&
+        request.resource.data.keys().hasAll(['sender','text','createdAt']) &&
+        request.resource.data.sender == request.auth.uid && request.resource.data.text is string &&
+        request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 300 &&
+        request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
     match /rooms/{room} {
       allow get: if signed();
       allow list, delete: if false;
